@@ -886,24 +886,19 @@ if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
         });
     }
     // 監聽查看紀錄按鈕 (找到原本的 onclick="showScreen('record-screen')" 改成呼叫這個)
-function showRecords() {
+// 監聽查看紀錄按鈕
+    function showRecords() {
         showScreen('record-screen');
         const listContainer = document.getElementById('record-list');
         listContainer.innerHTML = '<div style="padding: 20px; color: #999;">載入中...</div>';
 
         if (typeof window.loadRecordsFromFirebase === 'function') {
-            // 為了支援分頁，我們改抓最後 100 筆 (或更多)，在前端做分頁
-            // 注意：Firebase 查詢限制較多，若資料量巨大建議改用 startAt/endAt 查詢
-            // 這裡先假設抓 100 筆對前端負擔不大
-            const recordsRef = ref(db, 'records');
-            const q = query(recordsRef, limitToLast(100)); 
-            
-            onValue(q, (snapshot) => {
-                const data = snapshot.val();
+            // 直接呼叫全域函式，它已經封裝好 Firebase 邏輯了
+            window.loadRecordsFromFirebase((data) => {
                 if (!data) {
                     allRecords = [];
                 } else {
-                    allRecords = Object.values(data).reverse(); // 反轉讓最新的在前面
+                    allRecords = Object.values(data).reverse(); 
                 }
                 currentRecordPage = 1;
                 renderRecordList();
