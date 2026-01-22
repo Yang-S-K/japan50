@@ -584,36 +584,34 @@ function checkAnswer() {
 
     // 修改開始按鈕邏輯
 document.getElementById('start-btn').onclick = () => {
-    // 1. 重置與設定
-    stats = {
-        hira: { total: 0, correct: 0, label: "平假名" },
-        kata: { total: 0, correct: 0, label: "片假名" },
-        daku: { total: 0, correct: 0, label: "濁音/半濁音" },
-        ao:   { total: 0, correct: 0, label: "拗音" },
-        word: { total: 0, correct: 0, label: "單字詞" }
-    };
-    historyLog = []; // 重置詳細紀錄
+    // 1. 重置
+    for(let key in stats) { stats[key].total = 0; stats[key].correct = 0; }
+    historyLog = [];
     const inputCount = document.getElementById('quiz-count').value;
     currentQuizIndex = 1;
     correctCount = 0;
     
-    // 判斷是否為單字模式
-    const isWordMode = document.getElementById('t-word').classList.contains('active');
+    // 清空題目池
     currentQuestionPool = [];
 
+    // --- 修正 1：分別判斷兩種模式，並將題目「加入」池中，而非覆蓋 ---
+    const isWordMode = document.getElementById('t-word').classList.contains('active');
+    const isSingleMode = document.getElementById('t-single').classList.contains('active');
+
+    // 處理單字詞
     if (isWordMode) {
-        // --- 單字模式邏輯 ---
         if (!WORD_DATA || WORD_DATA.length === 0) { 
-            alert("單字庫尚未載入，請稍後再試！"); 
-            return; 
+            alert("單字庫尚未載入，請稍後再試！"); return; 
         }
-        currentQuestionPool = [...WORD_DATA];
-    } else {
-        // --- 單一音過濾邏輯 ---
+        // 使用 push(...array) 來合併，而不是直接賦值
+        currentQuestionPool.push(...WORD_DATA);
+    }
+
+    // 處理單一音 (只要有勾選單一音，就執行這段過濾)
+    if (isSingleMode) {
         const useHira = document.getElementById('base-hira').classList.contains('active');
         const useKata = document.getElementById('base-kata').classList.contains('active');
         
-        // 穩健抓取濁音與拗音按鈕
         const freeBtns = Array.from(document.querySelectorAll('[data-group="free"]'));
         const useDaku = freeBtns.find(b => b.innerText.includes('濁音'))?.classList.contains('active') || false;
         const useAo = freeBtns.find(b => b.innerText.includes('拗音'))?.classList.contains('active') || false;
@@ -829,7 +827,7 @@ if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
         }
     }
 
-    function generateOptions(correctObj, isJtoR) {
+function generateOptions(correctObj, isJtoR) {
         const container = document.getElementById('options-container');
         container.innerHTML = '';
         
@@ -837,23 +835,27 @@ if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
         const correctValue = isJtoR ? correctObj.romaji : correctObj.kana;
         options.push(correctValue);
 
-        // 隨機抓 3 個錯誤選項，並確保「意義」不重複
-        while (options.length < 4) {
+        // --- 修正 2：防止無窮迴圈 ---
+        // 目標是湊滿 4 個，但如果題庫總數小於 4 (例如只有 2 題)，就只湊到題庫的上限
+        // 另外增加一個 maxAttempts 防止因為隨機一直抽到重複的而卡死
+        const targetCount = Math.min(4, currentQuestionPool.length); 
+        let attempts = 0;
+
+        while (options.length < targetCount && attempts < 100) {
+            attempts++;
             const randomObj = currentQuestionPool[Math.floor(Math.random() * currentQuestionPool.length)];
             const randomValue = isJtoR ? randomObj.romaji : randomObj.kana;
             
-            // 檢查是否重複，或是否為同一發音的不同寫法
-            const isDuplicate发音 = options.some(opt => {
-                // 如果是羅翻假模式，要額外檢查羅馬拼音是否跟現有選項的羅馬拼音撞到
-                return opt === randomValue;
-            });
+            const isDuplicate = options.some(opt => opt === randomValue);
 
-            if (!isDuplicate发音) {
+            if (!isDuplicate) {
                 options.push(randomValue);
             }
         }
 
+        // 如果真的運氣太差抽不到，或題庫太小，就只顯示目前抓到的選項
         options.sort(() => Math.random() - 0.5);
+        
         options.forEach(opt => {
             const btn = document.createElement('button');
             btn.className = 'option-btn';
