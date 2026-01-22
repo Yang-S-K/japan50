@@ -599,12 +599,57 @@ document.getElementById('start-btn').onclick = () => {
     const isSingleMode = document.getElementById('t-single').classList.contains('active');
 
     // 處理單字詞
-    if (isWordMode) {
+if (isWordMode) {
         if (!WORD_DATA || WORD_DATA.length === 0) { 
-            alert("單字庫尚未載入，請稍後再試！"); return; 
+            alert("單字庫尚未載入，請稍後再試！"); 
+            return; 
         }
-        // 使用 push(...array) 來合併，而不是直接賦值
-        currentQuestionPool.push(...WORD_DATA);
+
+        // --- 智慧篩選邏輯開始 ---
+        
+        // 1. 抓取按鈕狀態 (長音、促音、撥音)
+        const ruleBtns = Array.from(document.querySelectorAll('[data-group="word-rule"]'));
+        const useChoon = ruleBtns.find(b => b.innerText.includes('長音'))?.classList.contains('active');
+        const useSokuon = ruleBtns.find(b => b.innerText.includes('促音'))?.classList.contains('active');
+        const useHatsuon = ruleBtns.find(b => b.innerText.includes('撥音'))?.classList.contains('active');
+
+        // 2. 判斷是否有勾選任何規則
+        const needFilter = useChoon || useSokuon || useHatsuon;
+
+        if (!needFilter) {
+            // 沒勾選 -> 題目池加入全部單字
+            currentQuestionPool.push(...WORD_DATA);
+        } else {
+            // 有勾選 -> 執行過濾
+            const filteredWords = WORD_DATA.filter(item => {
+                const k = item.kana;
+                const r = item.romaji.toLowerCase();
+                let match = false;
+
+                // 判斷促音：檢查假名是否有「っ」或「ッ」
+                if (useSokuon && /[っッ]/.test(k)) match = true;
+
+                // 判斷撥音：檢查假名是否有「ん」或「ン」
+                if (useHatsuon && /[んン]/.test(k)) match = true;
+
+                // 判斷長音：
+                // 1. 片假名檢查「ー」
+                // 2. 平假名檢查羅馬拼音是否含長音組合 (aa, ii, uu, ei, ou 等)
+                if (useChoon) {
+                    if (/[ー]/.test(k)) match = true; 
+                    if (/(aa|ii|uu|ee|oo|ou|ei)/.test(r)) match = true;
+                }
+
+                return match;
+            });
+
+            if (filteredWords.length === 0) {
+                alert("找不到符合規則（長音/促音/撥音）的單字！");
+                return;
+            }
+            // 將過濾後的單字加入題目池
+            currentQuestionPool.push(...filteredWords);
+        }
     }
 
     // 處理單一音 (只要有勾選單一音，就執行這段過濾)
