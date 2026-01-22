@@ -94,7 +94,49 @@
     </style>
 </head>
 <body>
+<script type="module">
+  // 1. 這裡要換成你自己 Firebase 專案的設定
+  // 去 Firebase Console -> Project settings -> General -> Your apps -> SDK setup and configuration -> CDN
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, push, onValue, query, limitToLast, orderByChild } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
+const firebaseConfig = {
+  apiKey: "AIzaSyDOjvH-Z-_ZcIvvGDGPNmTk5UI8cze6U0Y",
+  authDomain: "japan50-aaddf.firebaseapp.com",
+  databaseURL: "https://japan50-aaddf-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "japan50-aaddf",
+  storageBucket: "japan50-aaddf.firebasestorage.app",
+  messagingSenderId: "168676499160",
+  appId: "1:168676499160:web:168d4fc69fe81eb34281ad",
+  measurementId: "G-2CQLE5JGNK"
+};
+
+  // 初始化
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // --- 2. 定義存檔函式 (掛載到 window 讓全域可用) ---
+  window.saveRecordToFirebase = function(recordData) {
+      const recordsRef = ref(db, 'records');
+      push(recordsRef, {
+          ...recordData,
+          timestamp: Date.now() // 加上時間戳記
+      }).then(() => {
+          console.log("紀錄上傳成功");
+      }).catch((error) => {
+          console.error("上傳失敗", error);
+      });
+  };
+
+  // --- 3. 定義讀檔函式 ---
+  window.loadRecordsFromFirebase = function(callback) {
+      const recordsRef = query(ref(db, 'records'), limitToLast(20)); // 只抓最後 20 筆
+      onValue(recordsRef, (snapshot) => {
+          const data = snapshot.val();
+          if (callback) callback(data);
+      });
+  };
+</script>
 <div class="card" id="setup-screen">
     <h1 class="title">日語 50 音練習程式</h1>
     <div class="settings-box">
@@ -132,7 +174,7 @@
     <div class="actions-box">
         <button class="main-btn" id="start-btn">開始測驗</button>
         <div style="display: flex; gap: 12px; margin-top: 15px;">
-            <button class="sub-btn" onclick="showScreen('record-screen')">查看紀錄</button>
+            <button class="sub-btn" onclick="showRecords()">查看紀錄</button>
             <button class="sub-btn" id="view-kana-btn">50 音對照表</button>
         </div>
     </div>
@@ -149,9 +191,11 @@
 </div>
 
 <div class="card hidden" id="record-screen">
-    <h2 class="title">測驗紀錄</h2>
-    <div style="padding: 40px; color: #999;">尚無紀錄</div>
-    <button class="main-btn" onclick="showScreen('setup-screen')" style="background:#666;">返回</button>
+    <h2 class="title">測驗紀錄 (最近 20 筆)</h2>
+    <div id="record-list" style="max-height: 400px; overflow-y: auto; text-align: left;">
+        <div style="padding: 20px; color: #999; text-align: center;">載入中...</div>
+    </div>
+    <button class="main-btn" onclick="showScreen('setup-screen')" style="background:#666; margin-top: 20px;">返回</button>
 </div>
 
 <div class="card hidden" id="quiz-screen">
@@ -236,6 +280,54 @@ async function loadWordData() {
             alert("載入題庫失敗，請確認 JSON 檔案是否存在且格式正確。");
         }
     }
+
+    //  async function loadWordData() {
+
+    //     try {
+
+    //         // 範例： const response = await fetch('YOUR_GITHUB_JSON_URL');
+
+    //         // WORD_DATA = await response.json();
+
+           
+
+    //         // 目前先用假資料模擬，讓你測試功能
+
+    //         WORD_DATA = [
+
+    //             { kana: "わたし", romaji: "watashi", meaning: "我" },
+
+    //             { kana: "さくら", romaji: "sakura", meaning: "櫻花" },
+
+    //             { kana: "ねこ", romaji: "neko", meaning: "貓" },
+
+    //             { kana: "いぬ", romaji: "inu", meaning: "狗" },
+
+    //             { kana: "せんせい", romaji: "sensei", meaning: "老師" },
+
+    //             { kana: "がくせい", romaji: "gakusei", meaning: "學生" },
+
+    //             { kana: "おはよう", romaji: "ohayou", meaning: "早安" },
+
+    //             { kana: "ありがとう", romaji: "arigatou", meaning: "謝謝" },
+
+    //             { kana: "さようなら", romaji: "sayounara", meaning: "再見" },
+
+    //             { kana: "おいしい", romaji: "oishii", meaning: "好吃的" }
+
+    //         ];
+
+    //         console.log("單字庫載入完成，共 " + WORD_DATA.length + " 字");
+
+    //     } catch (e) {
+
+    //         console.error("載入失敗", e);
+
+    //         alert("題庫載入失敗");
+
+    //     }
+
+    // }
     // 程式一啟動就載入
     loadWordData();
     
@@ -683,6 +775,17 @@ function showResult() {
         statHTML += `</div><div style="margin-top: 20px; color: #555; font-weight:bold;">${comment}</div>`;
         
         document.getElementById('result-stat').innerHTML = statHTML;
+
+        if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
+            const record = {
+                date: new Date().toLocaleString(),
+                score: correctCount,
+                total: actualTotal,
+                percent: percent,
+                details: stats // 把詳細分類數據也存起來
+            };
+            window.saveRecordToFirebase(record);
+        }
     }
 
     function generateOptions(correctObj, isJtoR) {
@@ -740,6 +843,44 @@ function showResult() {
             };
             container.appendChild(btn);
         });
+    }
+    // 監聽查看紀錄按鈕 (找到原本的 onclick="showScreen('record-screen')" 改成呼叫這個)
+    function showRecords() {
+        showScreen('record-screen');
+        const listContainer = document.getElementById('record-list');
+        listContainer.innerHTML = '<div style="padding: 20px; color: #999; text-align: center;">載入中...</div>';
+
+        if (typeof window.loadRecordsFromFirebase === 'function') {
+            window.loadRecordsFromFirebase((data) => {
+                listContainer.innerHTML = '';
+                if (!data) {
+                    listContainer.innerHTML = '<div style="padding: 20px; color: #999; text-align: center;">尚無紀錄</div>';
+                    return;
+                }
+
+                // Firebase 回傳的是物件，轉成陣列並反轉 (最新的在上面)
+                const records = Object.values(data).reverse();
+                
+                records.forEach(rec => {
+                    const item = document.createElement('div');
+                    item.style.cssText = "border-bottom: 1px solid #eee; padding: 15px; margin-bottom: 10px;";
+                    
+                    // 根據分數決定顏色
+                    const color = rec.percent >= 80 ? 'green' : (rec.percent < 60 ? 'red' : 'orange');
+                    
+                    item.innerHTML = `
+                        <div style="font-size: 0.85rem; color: #888;">${rec.date}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                            <span style="font-size: 1.2rem; font-weight: bold; color: ${color};">${rec.score} / ${rec.total}</span>
+                            <span style="font-weight: bold;">${rec.percent}%</span>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+            });
+        } else {
+            listContainer.innerHTML = '<div style="color: red;">Firebase 未設定，無法讀取紀錄</div>';
+        }
     }
 </script>
 </body>
