@@ -129,13 +129,15 @@ const firebaseConfig = {
   };
 
   // --- 3. 定義讀檔函式 ---
-  window.loadRecordsFromFirebase = function(callback) {
-      const recordsRef = query(ref(db, 'records'), limitToLast(20)); // 只抓最後 20 筆
-      onValue(recordsRef, (snapshot) => {
-          const data = snapshot.val();
-          if (callback) callback(data);
-      });
-  };
+window.loadRecordsFromFirebase = function(callback) {
+    const recordsRef = ref(db, 'records');
+    // 這裡直接取最後 100 筆
+    const q = query(recordsRef, limitToLast(100)); 
+    onValue(q, (snapshot) => {
+        const data = snapshot.val();
+        if (callback) callback(data);
+    });
+};
 </script>
 <div class="card" id="setup-screen">
     <h1 class="title">日語 50 音練習程式</h1>
@@ -191,11 +193,31 @@ const firebaseConfig = {
 </div>
 
 <div class="card hidden" id="record-screen">
-    <h2 class="title">測驗紀錄 (最近 20 筆)</h2>
-    <div id="record-list" style="max-height: 400px; overflow-y: auto; text-align: left;">
-        <div style="padding: 20px; color: #999; text-align: center;">載入中...</div>
+    <h2 class="title">測驗紀錄</h2>
+    <div id="record-list" style="min-height: 300px;"></div>
+    
+    <div class="pagination-controls" style="margin-top: 15px; display: flex; justify-content: center; gap: 15px; align-items: center;">
+        <button class="sub-btn" id="rec-prev-btn" disabled>上一頁</button>
+        <span id="rec-page-info">1 / 1</span>
+        <button class="sub-btn" id="rec-next-btn" disabled>下一頁</button>
     </div>
-    <button class="main-btn" onclick="showScreen('setup-screen')" style="background:#666; margin-top: 20px;">返回</button>
+
+    <button class="main-btn" onclick="showScreen('setup-screen')" style="background:#666; margin-top: 20px;">返回主選單</button>
+</div>
+
+<div class="card hidden" id="detail-screen">
+    <h2 class="title">詳細紀錄</h2>
+    <div style="margin-bottom: 15px; font-weight: bold; color: #555;" id="detail-summary"></div>
+    
+    <div id="detail-table-container"></div>
+
+    <div class="pagination-controls" style="margin-top: 15px; display: flex; justify-content: center; gap: 15px; align-items: center;">
+        <button class="sub-btn" id="det-prev-btn" disabled>上一頁</button>
+        <span id="det-page-info">1 / 1</span>
+        <button class="sub-btn" id="det-next-btn" disabled>下一頁</button>
+    </div>
+
+    <button class="main-btn" onclick="showScreen('record-screen')" style="background:#666; margin-top: 20px;">返回列表</button>
 </div>
 
 <div class="card hidden" id="quiz-screen">
@@ -237,6 +259,14 @@ const firebaseConfig = {
 </div>
 <script>
     let historyLog = []; // 新增：用來記錄每題的詳細作答
+    // --- 分頁管理變數 ---
+    let allRecords = [];        // 存放從 Firebase 抓下來的所有紀錄
+    let currentRecordPage = 1;  // 列表頁當前頁碼
+    const RECORDS_PER_PAGE = 10;
+
+    let currentDetailData = []; // 存放當前正在查看的那一筆詳細題目
+    let currentDetailPage = 1;  // 詳細頁當前頁碼
+    const DETAILS_PER_PAGE = 10;
     // --- 統計數據變數 ---
     let stats = {
         hira: { total: 0, correct: 0, label: "平假名" },
@@ -859,89 +889,155 @@ if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
 function showRecords() {
         showScreen('record-screen');
         const listContainer = document.getElementById('record-list');
-        listContainer.innerHTML = '<div style="padding: 20px; color: #999; text-align: center;">載入中...</div>';
+        listContainer.innerHTML = '<div style="padding: 20px; color: #999;">載入中...</div>';
 
         if (typeof window.loadRecordsFromFirebase === 'function') {
-            window.loadRecordsFromFirebase((data) => {
-                listContainer.innerHTML = '';
+            // 為了支援分頁，我們改抓最後 100 筆 (或更多)，在前端做分頁
+            // 注意：Firebase 查詢限制較多，若資料量巨大建議改用 startAt/endAt 查詢
+            // 這裡先假設抓 100 筆對前端負擔不大
+            const recordsRef = ref(db, 'records');
+            const q = query(recordsRef, limitToLast(100)); 
+            
+            onValue(q, (snapshot) => {
+                const data = snapshot.val();
                 if (!data) {
-                    listContainer.innerHTML = '<div style="padding: 20px; color: #999; text-align: center;">尚無紀錄</div>';
-                    return;
+                    allRecords = [];
+                } else {
+                    allRecords = Object.values(data).reverse(); // 反轉讓最新的在前面
                 }
-
-                const records = Object.values(data).reverse();
-                
-                records.forEach((rec, index) => {
-                    const item = document.createElement('div');
-                    item.className = 'record-item'; // 方便 CSS 控制
-                    item.style.cssText = "border-bottom: 1px solid #eee; padding: 15px; margin-bottom: 10px; background: #fff; border-radius: 8px; cursor: pointer; transition: 0.2s;";
-                    
-                    // 滑鼠移過變色
-                    item.onmouseover = () => item.style.background = "#f9fafb";
-                    item.onmouseout = () => item.style.background = "#fff";
-
-                    const color = rec.percent >= 80 ? 'green' : (rec.percent < 60 ? 'red' : 'orange');
-                    
-                    // 主要資訊區塊
-                    let html = `
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <div style="font-size: 0.85rem; color: #888;">${rec.date}</div>
-                                <div style="font-size: 0.9rem; color: #555; margin-top: 3px;">點擊查看詳情 ▼</div>
-                            </div>
-                            <div style="text-align: right;">
-                                <span style="font-size: 1.4rem; font-weight: bold; color: ${color};">${rec.score} / ${rec.total}</span>
-                                <div style="font-weight: bold; font-size: 0.9rem;">${rec.percent}%</div>
-                            </div>
-                        </div>
-                    `;
-
-                    // 詳細資訊區塊 (預設隱藏)
-                    let detailHtml = `<div id="rec-detail-${index}" style="display: none; margin-top: 15px; border-top: 1px dashed #ddd; padding-top: 10px;">`;
-                    
-                    if (rec.history && rec.history.length > 0) {
-                        detailHtml += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-                            <tr style="background: #f0f0f0; color: #666;"><th style="padding: 5px;">題目</th><th style="padding: 5px;">作答</th><th style="padding: 5px;">正解</th></tr>`;
-                        
-                        rec.history.forEach(h => {
-                            const rowColor = h.c ? 'inherit' : '#ffebeb'; // 答錯顯示紅底
-                            const icon = h.c ? '<span style="color:green">✔</span>' : '<span style="color:red">✘</span>';
-                            // 如果有單字解釋，顯示在題目下方
-                            const meaningText = h.m ? `<br><span style="font-size: 0.8em; color: #888;">${h.m}</span>` : '';
-                            
-                            detailHtml += `
-                                <tr style="background: ${rowColor}; border-bottom: 1px solid #eee;">
-                                    <td style="padding: 8px; text-align: center;">${h.q}${meaningText}</td>
-                                    <td style="padding: 8px; text-align: center;">${h.u} ${icon}</td>
-                                    <td style="padding: 8px; text-align: center; color: green;">${h.a}</td>
-                                </tr>
-                            `;
-                        });
-                        detailHtml += `</table>`;
-                    } else {
-                        detailHtml += `<div style="text-align: center; color: #999;">無詳細資料</div>`;
-                    }
-                    detailHtml += `</div>`;
-
-                    item.innerHTML = html + detailHtml;
-
-                    // 點擊展開/收合邏輯
-                    item.onclick = function() {
-                        const detailDiv = document.getElementById(`rec-detail-${index}`);
-                        const isHidden = detailDiv.style.display === 'none';
-                        detailDiv.style.display = isHidden ? 'block' : 'none';
-                        // 簡單的箭頭切換
-                        const arrow = this.querySelector('div[style*="font-size: 0.9rem"]');
-                        if(arrow && arrow.innerText.includes('▼')) arrow.innerText = '點擊收合 ▲';
-                        else if(arrow) arrow.innerText = '點擊查看詳情 ▼';
-                    };
-
-                    listContainer.appendChild(item);
-                });
+                currentRecordPage = 1;
+                renderRecordList();
             });
         } else {
-            listContainer.innerHTML = '<div style="color: red;">Firebase 未設定，無法讀取紀錄</div>';
+            listContainer.innerHTML = 'Firebase 未設定';
         }
+    }
+
+    function renderRecordList() {
+        const listContainer = document.getElementById('record-list');
+        listContainer.innerHTML = '';
+
+        if (allRecords.length === 0) {
+            listContainer.innerHTML = '<div style="padding: 20px; color: #999;">尚無紀錄</div>';
+            updateRecordPagination();
+            return;
+        }
+
+        // 計算分頁範圍
+        const start = (currentRecordPage - 1) * RECORDS_PER_PAGE;
+        const end = start + RECORDS_PER_PAGE;
+        const pageData = allRecords.slice(start, end);
+
+        pageData.forEach((rec) => {
+            const item = document.createElement('div');
+            item.style.cssText = "border-bottom: 1px solid #eee; padding: 15px; background: #fff; cursor: pointer; transition: 0.2s; display: flex; justify-content: space-between; align-items: center;";
+            item.onmouseover = () => item.style.background = "#f9fafb";
+            item.onmouseout = () => item.style.background = "#fff";
+
+            const color = rec.percent >= 80 ? 'green' : (rec.percent < 60 ? 'red' : 'orange');
+
+            item.innerHTML = `
+                <div style="text-align: left;">
+                    <div style="font-size: 0.85rem; color: #888;">${rec.date}</div>
+                    <div style="color: #3b82f6; font-size: 0.9rem;">查看詳情 &gt;</div>
+                </div>
+                <div style="text-align: right;">
+                    <span style="font-size: 1.2rem; font-weight: bold; color: ${color};">${rec.score} / ${rec.total}</span>
+                    <div style="font-weight: bold; font-size: 0.8rem;">${rec.percent}%</div>
+                </div>
+            `;
+            
+            // 點擊進入詳細頁
+            item.onclick = () => showDetailScreen(rec);
+            
+            listContainer.appendChild(item);
+        });
+
+        updateRecordPagination();
+    }
+
+    function updateRecordPagination() {
+        const totalPages = Math.ceil(allRecords.length / RECORDS_PER_PAGE) || 1;
+        document.getElementById('rec-page-info').innerText = `${currentRecordPage} / ${totalPages}`;
+        
+        const prevBtn = document.getElementById('rec-prev-btn');
+        const nextBtn = document.getElementById('rec-next-btn');
+        
+        prevBtn.disabled = currentRecordPage === 1;
+        nextBtn.disabled = currentRecordPage === totalPages;
+
+        prevBtn.onclick = () => { if(currentRecordPage > 1) { currentRecordPage--; renderRecordList(); } };
+        nextBtn.onclick = () => { if(currentRecordPage < totalPages) { currentRecordPage++; renderRecordList(); } };
+    }
+    function showDetailScreen(record) {
+        showScreen('detail-screen');
+        
+        // 顯示摘要
+        const color = record.percent >= 80 ? 'green' : 'red';
+        document.getElementById('detail-summary').innerHTML = `
+            ${record.date}<br>
+            得分：<span style="color:${color}">${record.score} / ${record.total}</span> (${record.percent}%)
+        `;
+
+        currentDetailData = record.history || [];
+        currentDetailPage = 1;
+        renderDetailTable();
+    }
+
+    function renderDetailTable() {
+        const container = document.getElementById('detail-table-container');
+        container.innerHTML = '';
+
+        if (currentDetailData.length === 0) {
+            container.innerHTML = '<div style="color:#999; padding:20px;">無詳細資料</div>';
+            updateDetailPagination();
+            return;
+        }
+
+        // 計算分頁範圍
+        const start = (currentDetailPage - 1) * DETAILS_PER_PAGE;
+        const end = start + DETAILS_PER_PAGE;
+        const pageData = currentDetailData.slice(start, end);
+
+        let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                    <tr style="background: #f0f0f0; color: #666;">
+                        <th style="padding: 8px;">題目</th>
+                        <th style="padding: 8px;">作答</th>
+                        <th style="padding: 8px;">正解</th>
+                    </tr>`;
+
+        pageData.forEach(h => {
+            const rowColor = h.c ? '#fff' : '#ffebeb';
+            const icon = h.c ? '<span style="color:green">✔</span>' : '<span style="color:red">✘</span>';
+            const meaningText = h.m ? `<div style="font-size: 0.8em; color: #888;">${h.m}</div>` : '';
+
+            html += `<tr style="background: ${rowColor}; border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px; text-align: center;">
+                            <span style="font-weight:bold; font-size:1.1rem;">${h.q}</span>
+                            ${meaningText}
+                        </td>
+                        <td style="padding: 10px; text-align: center;">${h.u} ${icon}</td>
+                        <td style="padding: 10px; text-align: center; color: green; font-weight:bold;">${h.a}</td>
+                     </tr>`;
+        });
+
+        html += `</table>`;
+        container.innerHTML = html;
+        updateDetailPagination();
+    }
+
+    function updateDetailPagination() {
+        const totalPages = Math.ceil(currentDetailData.length / DETAILS_PER_PAGE) || 1;
+        document.getElementById('det-page-info').innerText = `${currentDetailPage} / ${totalPages}`;
+        
+        const prevBtn = document.getElementById('det-prev-btn');
+        const nextBtn = document.getElementById('det-next-btn');
+        
+        prevBtn.disabled = currentDetailPage === 1;
+        nextBtn.disabled = currentDetailPage === totalPages;
+
+        prevBtn.onclick = () => { if(currentDetailPage > 1) { currentDetailPage--; renderDetailTable(); } };
+        nextBtn.onclick = () => { if(currentDetailPage < totalPages) { currentDetailPage++; renderDetailTable(); } };
     }
 </script>
 </body>
