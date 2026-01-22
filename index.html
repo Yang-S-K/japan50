@@ -311,7 +311,13 @@ async function loadWordData() {
             alert("載入題庫失敗，請確認 JSON 檔案是否存在且格式正確。");
         }
     }
-
+// 平假名轉片假名函式
+    function hiraToKata(str) {
+        return str.replace(/[\u3041-\u3096]/g, function(match) {
+            var chr = match.charCodeAt(0) + 0x60;
+            return String.fromCharCode(chr);
+        });
+    }
     //  async function loadWordData() {
 
     //     try {
@@ -584,82 +590,83 @@ function checkAnswer() {
 
     // 修改開始按鈕邏輯
 document.getElementById('start-btn').onclick = () => {
-    // 1. 重置
+    // 1. 初始化 (保持不變)
     for(let key in stats) { stats[key].total = 0; stats[key].correct = 0; }
     historyLog = [];
     const inputCount = document.getElementById('quiz-count').value;
     currentQuizIndex = 1;
     correctCount = 0;
     
-    // 清空題目池
     currentQuestionPool = [];
 
-    // --- 修正 1：分別判斷兩種模式，並將題目「加入」池中，而非覆蓋 ---
     const isWordMode = document.getElementById('t-word').classList.contains('active');
     const isSingleMode = document.getElementById('t-single').classList.contains('active');
 
-    // 處理單字詞
-if (isWordMode) {
+    // --- A. 單字模式邏輯 (修正版) ---
+    if (isWordMode) {
         if (!WORD_DATA || WORD_DATA.length === 0) { 
-            alert("單字庫尚未載入，請稍後再試！"); 
-            return; 
+            alert("單字庫尚未載入，請稍後再試！"); return; 
         }
 
-        // --- 智慧篩選邏輯開始 ---
-        
-        // 1. 抓取按鈕狀態 (長音、促音、撥音)
+        // 1. 取得規則按鈕狀態
         const ruleBtns = Array.from(document.querySelectorAll('[data-group="word-rule"]'));
         const useChoon = ruleBtns.find(b => b.innerText.includes('長音'))?.classList.contains('active');
         const useSokuon = ruleBtns.find(b => b.innerText.includes('促音'))?.classList.contains('active');
         const useHatsuon = ruleBtns.find(b => b.innerText.includes('撥音'))?.classList.contains('active');
+        
+        // 2. 判斷是否需要轉片假名
+        const useKataBase = document.getElementById('base-kata').classList.contains('active');
 
-        // 2. 判斷是否有勾選任何規則
-        const needFilter = useChoon || useSokuon || useHatsuon;
+        // 3. 執行過濾與轉換
+        const filteredWords = WORD_DATA.filter(item => {
+            const k = item.kana;
+            const r = item.romaji.toLowerCase();
 
-        if (!needFilter) {
-            // 沒勾選 -> 題目池加入全部單字
-            currentQuestionPool.push(...WORD_DATA);
-        } else {
-            // 有勾選 -> 執行過濾
-            const filteredWords = WORD_DATA.filter(item => {
-                const k = item.kana;
-                const r = item.romaji.toLowerCase();
-                let match = false;
+            // 判斷該單字是否包含特殊規則
+            const hasSokuon = /[っッ]/.test(k);
+            const hasHatsuon = /[んン]/.test(k);
+            const hasChoon = /[ー]/.test(k) || /(aa|ii|uu|ee|oo|ou|ei)/.test(r);
+            
+            // 判斷是否為「基本單字」(沒有任何特殊規則的字)
+            const isBasic = !hasSokuon && !hasHatsuon && !hasChoon;
 
-                // 判斷促音：檢查假名是否有「っ」或「ッ」
-                if (useSokuon && /[っッ]/.test(k)) match = true;
+            // 邏輯修正：基本單字永遠保留 || (有特殊規則 且 該規則被勾選)
+            if (isBasic) return true;
+            if (hasSokuon && useSokuon) return true;
+            if (hasHatsuon && useHatsuon) return true;
+            if (hasChoon && useChoon) return true;
 
-                // 判斷撥音：檢查假名是否有「ん」或「ン」
-                if (useHatsuon && /[んン]/.test(k)) match = true;
+            return false;
+        });
 
-                // 判斷長音：
-                // 1. 片假名檢查「ー」
-                // 2. 平假名檢查羅馬拼音是否含長音組合 (aa, ii, uu, ei, ou 等)
-                if (useChoon) {
-                    if (/[ー]/.test(k)) match = true; 
-                    if (/(aa|ii|uu|ee|oo|ou|ei)/.test(r)) match = true;
-                }
-
-                return match;
-            });
-
-            if (filteredWords.length === 0) {
-                alert("找不到符合規則（長音/促音/撥音）的單字！");
-                return;
-            }
-            // 將過濾後的單字加入題目池
-            currentQuestionPool.push(...filteredWords);
+        if (filteredWords.length === 0) {
+            alert("沒有符合條件的單字！"); return;
         }
+
+        // 4. 將過濾後的單字加入題庫 (同時處理片假名轉換)
+        const finalWordPool = filteredWords.map(item => {
+            let displayKana = item.kana;
+            // 如果選了片假名模式，就把題目轉成片假名
+            if (useKataBase) {
+                displayKana = hiraToKata(displayKana);
+            }
+            return {
+                kana: displayKana,
+                romaji: item.romaji,
+                meaning: item.meaning
+            };
+        });
+
+        currentQuestionPool.push(...finalWordPool);
     }
 
-    // 處理單一音 (只要有勾選單一音，就執行這段過濾)
+    // --- B. 單一音模式邏輯 (保持不變) ---
     if (isSingleMode) {
         const useHira = document.getElementById('base-hira').classList.contains('active');
         const useKata = document.getElementById('base-kata').classList.contains('active');
-        
         const freeBtns = Array.from(document.querySelectorAll('[data-group="free"]'));
-        const useDaku = freeBtns.find(b => b.innerText.includes('濁音'))?.classList.contains('active') || false;
-        const useAo = freeBtns.find(b => b.innerText.includes('拗音'))?.classList.contains('active') || false;
+        const useDaku = freeBtns.find(b => b.innerText.includes('濁音'))?.classList.contains('active');
+        const useAo = freeBtns.find(b => b.innerText.includes('拗音'))?.classList.contains('active');
 
         function addToPool(obj) {
             for (let k in obj) currentQuestionPool.push({ kana: k, romaji: obj[k] });
@@ -676,20 +683,16 @@ if (isWordMode) {
 
     if (currentQuestionPool.length === 0) { alert("請至少選擇一個範圍！"); return; }
 
-    // 2. 隨機打亂
+    // 後續初始化 (保持不變)
     remainingQuestions = [...currentQuestionPool].sort(() => Math.random() - 0.5);
-
-    // 3. 設定總題數
     const maxAvailable = remainingQuestions.length;
     totalQuizCount = inputCount ? Math.min(parseInt(inputCount), maxAvailable) : Math.min(10, maxAvailable);
     
-    // 4. UI 初始化
     const isInputMode = document.getElementById('m-input').classList.contains('active');
     document.getElementById('options-container').classList.toggle('hidden', isInputMode);
     document.getElementById('ans-preview').classList.toggle('hidden', !isInputMode);
     document.getElementById('check-ans-btn').classList.toggle('hidden', !isInputMode);
     document.getElementById('keyboard').classList.toggle('hidden', !isInputMode);
-    
     document.getElementById('word-meaning').classList.add('hidden');
 
     showScreen('quiz-screen');
