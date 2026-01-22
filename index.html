@@ -236,6 +236,7 @@ const firebaseConfig = {
     <button class="main-btn" onclick="showScreen('setup-screen')" style="width: 100%;">回到主選單</button>
 </div>
 <script>
+    let historyLog = []; // 新增：用來記錄每題的詳細作答
     // --- 統計數據變數 ---
     let stats = {
         hira: { total: 0, correct: 0, label: "平假名" },
@@ -561,7 +562,7 @@ document.getElementById('start-btn').onclick = () => {
         ao:   { total: 0, correct: 0, label: "拗音" },
         word: { total: 0, correct: 0, label: "單字詞" }
     };
-
+    historyLog = []; // 重置詳細紀錄
     const inputCount = document.getElementById('quiz-count').value;
     currentQuizIndex = 1;
     correctCount = 0;
@@ -682,7 +683,7 @@ function nextQuestion() {
     }
 
 function checkAnswer() {
-        const userAns = document.getElementById('ans-preview').innerText.trim();
+const userAns = document.getElementById('ans-preview').innerText.trim();
         if (!userAns) return;
         
         const feedbackLayer = document.getElementById('feedback-layer');
@@ -708,7 +709,16 @@ function checkAnswer() {
             feedbackIcon.innerText = "×";
             feedbackIcon.className = "wrong-text animate-feedback";
         }
-
+        const isCorrect = (userAns === currentTargetAnswer);
+        const qText = document.getElementById('q-text').innerText;
+        
+        historyLog.push({
+            q: qText,                // 題目
+            a: currentTargetAnswer,  // 正確答案
+            u: userAns,              // 用戶答案
+            c: isCorrect,            // 是否答對
+            m: currentMeaning        // 單字意思 (如果是單字模式)
+        });
         setTimeout(() => {
             feedbackLayer.classList.add('hidden');
             feedbackIcon.className = "";
@@ -776,13 +786,14 @@ function showResult() {
         
         document.getElementById('result-stat').innerHTML = statHTML;
 
-        if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
+if (actualTotal > 0 && typeof window.saveRecordToFirebase === 'function') {
             const record = {
                 date: new Date().toLocaleString(),
                 score: correctCount,
                 total: actualTotal,
                 percent: percent,
-                details: stats // 把詳細分類數據也存起來
+                details: stats,
+                history: historyLog // --- 新增：把詳細歷程也上傳 ---
             };
             window.saveRecordToFirebase(record);
         }
@@ -845,7 +856,7 @@ function showResult() {
         });
     }
     // 監聽查看紀錄按鈕 (找到原本的 onclick="showScreen('record-screen')" 改成呼叫這個)
-    function showRecords() {
+function showRecords() {
         showScreen('record-screen');
         const listContainer = document.getElementById('record-list');
         listContainer.innerHTML = '<div style="padding: 20px; color: #999; text-align: center;">載入中...</div>';
@@ -858,23 +869,73 @@ function showResult() {
                     return;
                 }
 
-                // Firebase 回傳的是物件，轉成陣列並反轉 (最新的在上面)
                 const records = Object.values(data).reverse();
                 
-                records.forEach(rec => {
+                records.forEach((rec, index) => {
                     const item = document.createElement('div');
-                    item.style.cssText = "border-bottom: 1px solid #eee; padding: 15px; margin-bottom: 10px;";
+                    item.className = 'record-item'; // 方便 CSS 控制
+                    item.style.cssText = "border-bottom: 1px solid #eee; padding: 15px; margin-bottom: 10px; background: #fff; border-radius: 8px; cursor: pointer; transition: 0.2s;";
                     
-                    // 根據分數決定顏色
+                    // 滑鼠移過變色
+                    item.onmouseover = () => item.style.background = "#f9fafb";
+                    item.onmouseout = () => item.style.background = "#fff";
+
                     const color = rec.percent >= 80 ? 'green' : (rec.percent < 60 ? 'red' : 'orange');
                     
-                    item.innerHTML = `
-                        <div style="font-size: 0.85rem; color: #888;">${rec.date}</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
-                            <span style="font-size: 1.2rem; font-weight: bold; color: ${color};">${rec.score} / ${rec.total}</span>
-                            <span style="font-weight: bold;">${rec.percent}%</span>
+                    // 主要資訊區塊
+                    let html = `
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 0.85rem; color: #888;">${rec.date}</div>
+                                <div style="font-size: 0.9rem; color: #555; margin-top: 3px;">點擊查看詳情 ▼</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <span style="font-size: 1.4rem; font-weight: bold; color: ${color};">${rec.score} / ${rec.total}</span>
+                                <div style="font-weight: bold; font-size: 0.9rem;">${rec.percent}%</div>
+                            </div>
                         </div>
                     `;
+
+                    // 詳細資訊區塊 (預設隱藏)
+                    let detailHtml = `<div id="rec-detail-${index}" style="display: none; margin-top: 15px; border-top: 1px dashed #ddd; padding-top: 10px;">`;
+                    
+                    if (rec.history && rec.history.length > 0) {
+                        detailHtml += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                            <tr style="background: #f0f0f0; color: #666;"><th style="padding: 5px;">題目</th><th style="padding: 5px;">作答</th><th style="padding: 5px;">正解</th></tr>`;
+                        
+                        rec.history.forEach(h => {
+                            const rowColor = h.c ? 'inherit' : '#ffebeb'; // 答錯顯示紅底
+                            const icon = h.c ? '<span style="color:green">✔</span>' : '<span style="color:red">✘</span>';
+                            // 如果有單字解釋，顯示在題目下方
+                            const meaningText = h.m ? `<br><span style="font-size: 0.8em; color: #888;">${h.m}</span>` : '';
+                            
+                            detailHtml += `
+                                <tr style="background: ${rowColor}; border-bottom: 1px solid #eee;">
+                                    <td style="padding: 8px; text-align: center;">${h.q}${meaningText}</td>
+                                    <td style="padding: 8px; text-align: center;">${h.u} ${icon}</td>
+                                    <td style="padding: 8px; text-align: center; color: green;">${h.a}</td>
+                                </tr>
+                            `;
+                        });
+                        detailHtml += `</table>`;
+                    } else {
+                        detailHtml += `<div style="text-align: center; color: #999;">無詳細資料</div>`;
+                    }
+                    detailHtml += `</div>`;
+
+                    item.innerHTML = html + detailHtml;
+
+                    // 點擊展開/收合邏輯
+                    item.onclick = function() {
+                        const detailDiv = document.getElementById(`rec-detail-${index}`);
+                        const isHidden = detailDiv.style.display === 'none';
+                        detailDiv.style.display = isHidden ? 'block' : 'none';
+                        // 簡單的箭頭切換
+                        const arrow = this.querySelector('div[style*="font-size: 0.9rem"]');
+                        if(arrow && arrow.innerText.includes('▼')) arrow.innerText = '點擊收合 ▲';
+                        else if(arrow) arrow.innerText = '點擊查看詳情 ▼';
+                    };
+
                     listContainer.appendChild(item);
                 });
             });
